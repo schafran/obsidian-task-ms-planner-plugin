@@ -33,7 +33,7 @@ export default class TodoSyncPlugin extends Plugin {
 			now: () => new Date(),
 			reminderTime: this.settings.reminderTime,
 			listName: this.settings.listName,
-			log: (message) => console.log(`[todo-sync] ${message}`),
+			log: (message) => console.debug(`[todo-sync] ${message}`),
 		});
 
 		this.addSettingTab(new TodoSyncSettingTab(this.app, this));
@@ -126,7 +126,7 @@ export default class TodoSyncPlugin extends Plugin {
 	startPolling(): void {
 		this.stopPolling();
 		const intervalMs = this.settings.pollIntervalMinutes * 60 * 1000;
-		this.pollIntervalId = window.setInterval(() => this.runSyncCycle(), intervalMs);
+		this.pollIntervalId = window.setInterval(() => void this.runSyncCycle(), intervalMs);
 		this.registerInterval(this.pollIntervalId);
 	}
 

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DeviceCodeRequest } from '@azure/msal-node';
+
+type DeviceCodeResponse = Parameters<DeviceCodeRequest['deviceCodeCallback']>[0];
 
 const acquireTokenByDeviceCode = vi.fn();
 const acquireTokenSilent = vi.fn();
@@ -24,15 +27,23 @@ describe('MsalDeviceCodeAuth', () => {
 	});
 
 	it('signIn forwards the device code details to the callback and returns the access token', async () => {
-		acquireTokenByDeviceCode.mockImplementation(async ({ deviceCodeCallback }) => {
-			deviceCodeCallback({
-				userCode: 'ABC123',
-				verificationUri: 'https://microsoft.com/devicelogin',
-				message: 'Go there and enter ABC123',
-				expiresIn: 900,
-			});
-			return { accessToken: 'token-1', account: { homeAccountId: 'acc-1' } };
-		});
+		acquireTokenByDeviceCode.mockImplementation(
+			async ({
+				deviceCodeCallback,
+			}: {
+				deviceCodeCallback: (response: DeviceCodeResponse) => void;
+			}) => {
+				deviceCodeCallback({
+					userCode: 'ABC123',
+					deviceCode: 'device-code-1',
+					verificationUri: 'https://microsoft.com/devicelogin',
+					message: 'Go there and enter ABC123',
+					expiresIn: 900,
+					interval: 5,
+				});
+				return { accessToken: 'token-1', account: { homeAccountId: 'acc-1' } };
+			},
+		);
 
 		const auth = new MsalDeviceCodeAuth({} as never);
 		const onDeviceCode = vi.fn();

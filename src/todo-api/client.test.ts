@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { TodoClient } from './client';
 import { RetryAfterError } from './types';
 
@@ -14,7 +14,7 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
 
 describe('TodoClient', () => {
 	const getAccessToken = vi.fn(async () => 'fake-token');
-	let fetchMock: ReturnType<typeof vi.fn>;
+	let fetchMock: Mock<[url: string, init: RequestInit], Promise<Response>>;
 
 	beforeEach(() => {
 		fetchMock = vi.fn();
@@ -45,7 +45,7 @@ describe('TodoClient', () => {
 		expect(list).toEqual({ id: '2', displayName: 'Obsidian' });
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		const [, createInit] = fetchMock.mock.calls[1]!;
-		expect(JSON.parse(createInit.body)).toEqual({ displayName: 'Obsidian' });
+		expect(JSON.parse(createInit.body as string)).toEqual({ displayName: 'Obsidian' });
 	});
 
 	it('createTask sends title, due date, and reminder', async () => {
@@ -58,7 +58,12 @@ describe('TodoClient', () => {
 		});
 		const [url, init] = fetchMock.mock.calls[0]!;
 		expect(url).toBe('https://graph.microsoft.com/v1.0/me/todo/lists/list1/tasks');
-		const body = JSON.parse(init.body);
+		const body = JSON.parse(init.body as string) as {
+			title: string;
+			dueDateTime: unknown;
+			reminderDateTime: unknown;
+			isReminderOn: boolean;
+		};
 		expect(body.title).toBe('Renew passport');
 		expect(body.dueDateTime).toEqual({ dateTime: '2026-10-01T00:00:00', timeZone: 'UTC' });
 		expect(body.reminderDateTime).toEqual({
@@ -75,7 +80,7 @@ describe('TodoClient', () => {
 		const [url, init] = fetchMock.mock.calls[0]!;
 		expect(url).toBe('https://graph.microsoft.com/v1.0/me/todo/lists/list1/tasks/t1');
 		expect(init.method).toBe('PATCH');
-		expect(JSON.parse(init.body)).toEqual({ status: 'completed' });
+		expect(JSON.parse(init.body as string)).toEqual({ status: 'completed' });
 	});
 
 	it('fetchDelta follows nextLink pages and returns the final deltaLink', async () => {
