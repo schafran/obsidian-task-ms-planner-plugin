@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SyncEngine, type SyncEngineDeps } from './engine';
 import type { VaultAdapter, VaultFile } from '../obsidian-tasks/vault-adapter';
-import type { TodoTask } from '../todo-api/types';
+import { RetryAfterError, type TodoTask } from '../todo-api/types';
 import { loadSyncData } from './state-store';
 
 function fakeVault(files: Record<string, string>): VaultAdapter {
@@ -257,6 +257,23 @@ describe('SyncEngine.runPollCycle', () => {
 
 		expect(updateTask).toHaveBeenCalledTimes(1);
 		expect(result.taskStates['t1']).toBeDefined();
+	});
+
+	it('propagates a RetryAfterError instead of swallowing it as a per-task failure', async () => {
+		const vault = fakeVault({
+			'note.md': '- [x] Renew passport 📅 2026-10-05 ✅ 2026-09-21 %%todo:t1%%',
+		});
+		const updateTask = vi.fn(async () => {
+			throw new RetryAfterError(30);
+		});
+		const priorData = loadSyncData({
+			deltaLink: 'cursor-1',
+			taskStates: { t1: { lastKnownRemoteModified: '2026-09-20T09:00:00Z', lastSyncedAtMs: 500 } },
+			pending: [],
+		});
+		const engine = new SyncEngine(deps({ vault, todo: { ...deps().todo, updateTask } }));
+
+		await expect(engine.runPollCycle(priorData)).rejects.toBeInstanceOf(RetryAfterError);
 	});
 
 	it('isolates a per-task failure so the rest of the cycle still completes', async () => {

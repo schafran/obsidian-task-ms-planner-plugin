@@ -2,7 +2,7 @@ import { parseTaskLine, renderTaskLine } from '../obsidian-tasks/parser';
 import { getIsoWeekNotePath, insertActionItem } from '../obsidian-tasks/weekly-note';
 import type { VaultAdapter, VaultFile } from '../obsidian-tasks/vault-adapter';
 import type { TodoClient } from '../todo-api/client';
-import type { TodoTask } from '../todo-api/types';
+import { RetryAfterError, type TodoTask } from '../todo-api/types';
 import type { ParsedTaskLine } from '../types';
 import { PendingQueue } from './pending-queue';
 import type { SyncData } from './state-store';
@@ -101,6 +101,7 @@ export class SyncEngine {
 					lastSyncedAtMs: now().getTime(),
 				};
 			} catch (err) {
+				if (err instanceof RetryAfterError) throw err;
 				log(`Sync cycle: failed to process matched task ${todoId}: ${String(err)}`);
 			}
 		}
@@ -125,6 +126,7 @@ export class SyncEngine {
 					lastSyncedAtMs: now().getTime(),
 				};
 			} catch (err) {
+				if (err instanceof RetryAfterError) throw err;
 				log(`Sync cycle: failed to push local task in ${located.file.path}: ${String(err)}`);
 			}
 		}
@@ -161,6 +163,7 @@ export class SyncEngine {
 						lastSyncedAtMs: now().getTime(),
 					};
 				} catch (err) {
+					if (err instanceof RetryAfterError) throw err;
 					log(`Sync cycle: failed to flush pending task ${pendingTask.todoId}: ${String(err)}`);
 				}
 			}
