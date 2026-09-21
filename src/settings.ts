@@ -1,38 +1,82 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
-import MyPlugin from './main';
+import type TodoSyncPlugin from './main';
 
-export interface MyPluginSettings {
-	mySetting: string;
+export interface TodoSyncSettings {
+	listName: string;
+	pollIntervalMinutes: number;
+	reminderTime: string; // HH:mm, local
+	signedInAccountLabel: string | null;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default',
+export const DEFAULT_SETTINGS: TodoSyncSettings = {
+	listName: 'Obsidian',
+	pollIntervalMinutes: 10,
+	reminderTime: '08:00',
+	signedInAccountLabel: null,
 };
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+export class TodoSyncSettingTab extends PluginSettingTab {
+	constructor(
+		app: App,
+		private readonly plugin: TodoSyncPlugin,
+	) {
 		super(app, plugin);
-		this.plugin = plugin;
 	}
 
 	display(): void {
 		const { containerEl } = this;
-
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc("It's a secret")
+			.setName('Account')
+			.setDesc(
+				this.plugin.settings.signedInAccountLabel
+					? `Signed in as ${this.plugin.settings.signedInAccountLabel}`
+					: 'Not signed in',
+			)
+			.addButton((button) => {
+				button
+					.setButtonText(
+						this.plugin.settings.signedInAccountLabel ? 'Sign out' : 'Sign in',
+					)
+					.onClick(() => this.plugin.handleSignInOutFromSettings());
+			});
+
+		new Setting(containerEl)
+			.setName('To Do list name')
+			.setDesc('Created automatically on first sign-in if it does not already exist.')
+			.addText((text) =>
+				text.setValue(this.plugin.settings.listName).onChange(async (value) => {
+					this.plugin.settings.listName = value.trim() || DEFAULT_SETTINGS.listName;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName('Poll interval (minutes)')
 			.addText((text) =>
 				text
-					.setPlaceholder('Enter your secret')
-					.setValue(this.plugin.settings.mySetting)
+					.setValue(String(this.plugin.settings.pollIntervalMinutes))
 					.onChange(async (value) => {
-						this.plugin.settings.mySetting = value;
-						await this.plugin.saveSettings();
+						const minutes = Number(value);
+						if (Number.isFinite(minutes) && minutes > 0) {
+							this.plugin.settings.pollIntervalMinutes = minutes;
+							await this.plugin.saveSettings();
+							this.plugin.restartPolling();
+						}
 					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Default reminder time')
+			.setDesc('Local time used for the reminder on tasks pushed from Obsidian to To Do.')
+			.addText((text) =>
+				text.setValue(this.plugin.settings.reminderTime).onChange(async (value) => {
+					if (/^\d{2}:\d{2}$/.test(value)) {
+						this.plugin.settings.reminderTime = value;
+						await this.plugin.saveSettings();
+					}
+				}),
 			);
 	}
 }
