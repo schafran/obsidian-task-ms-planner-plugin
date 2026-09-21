@@ -11,14 +11,14 @@ export function parseTaskLine(line: string): ParsedTaskLine | null {
 	if (!checkboxMatch) return null;
 
 	const [, mark, rest] = checkboxMatch;
-	const dueMatch = DUE_DATE_RE.exec(rest);
+	const dueMatch = DUE_DATE_RE.exec(rest!);
 	if (!dueMatch) return null;
 
-	const doneMatch = DONE_DATE_RE.exec(rest);
-	const markerMatch = MARKER_RE.exec(rest);
-	const recurring = RECURRENCE_RE.test(rest);
+	const doneMatch = DONE_DATE_RE.exec(rest!);
+	const markerMatch = MARKER_RE.exec(rest!);
+	const recurring = RECURRENCE_RE.test(rest!);
 
-	const title = rest
+	const title = rest!
 		.replace(MARKER_RE, '')
 		.replace(RECURRENCE_RE, '')
 		.replace(DONE_DATE_RE, '')
@@ -26,12 +26,12 @@ export function parseTaskLine(line: string): ParsedTaskLine | null {
 		.trim();
 
 	return {
-		checked: mark.toLowerCase() === 'x',
+		checked: mark!.toLowerCase() === 'x',
 		title,
-		dueDate: dueMatch[1],
-		doneDate: doneMatch ? doneMatch[1] : null,
+		dueDate: dueMatch[1]!,
+		doneDate: doneMatch ? doneMatch[1]! : null,
 		recurring,
-		todoId: markerMatch ? markerMatch[1] : null,
+		todoId: markerMatch ? markerMatch[1]! : null,
 	};
 }
 
