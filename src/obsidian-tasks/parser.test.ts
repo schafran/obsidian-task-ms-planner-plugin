@@ -12,6 +12,7 @@ describe('parseTaskLine', () => {
 
 	it('parses an open task with a due date', () => {
 		expect(parseTaskLine('- [ ] Renew passport 📅 2026-10-01')).toEqual({
+			indent: '',
 			checked: false,
 			title: 'Renew passport',
 			dueDate: '2026-10-01',
@@ -25,6 +26,7 @@ describe('parseTaskLine', () => {
 		expect(
 			parseTaskLine('- [x] Renew passport 📅 2026-10-01 ✅ 2026-09-30'),
 		).toEqual({
+			indent: '',
 			checked: true,
 			title: 'Renew passport',
 			dueDate: '2026-10-01',
@@ -57,12 +59,20 @@ describe('parseTaskLine', () => {
 	it('is case-insensitive on the checkbox mark', () => {
 		expect(parseTaskLine('- [X] Done 📅 2026-10-01')?.checked).toBe(true);
 	});
+
+	it('captures leading whitespace for nested tasks and preserves it on render', () => {
+		const line = '    - [ ] Nested 📅 2026-10-01';
+		const parsed = parseTaskLine(line);
+		expect(parsed?.indent).toBe('    ');
+		expect(renderTaskLine(parsed!)).toBe(line);
+	});
 });
 
 describe('renderTaskLine', () => {
 	it('renders an open task with a due date', () => {
 		expect(
 			renderTaskLine({
+				indent: '',
 				checked: false,
 				title: 'Renew passport',
 				dueDate: '2026-10-01',
@@ -76,6 +86,7 @@ describe('renderTaskLine', () => {
 	it('renders a completed task with the marker', () => {
 		expect(
 			renderTaskLine({
+				indent: '',
 				checked: true,
 				title: 'Renew passport',
 				dueDate: '2026-10-01',

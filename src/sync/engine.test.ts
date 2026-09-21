@@ -80,6 +80,20 @@ describe('SyncEngine.runPollCycle', () => {
 		expect(result.taskStates['new-id']).toBeDefined();
 	});
 
+	it('does not push an already-completed local task with no marker', async () => {
+		const original = '- [x] Done thing 📅 2020-01-01 ✅ 2020-01-02';
+		const vault = fakeVault({ 'note.md': original });
+		const createTask = vi.fn();
+		const engine = new SyncEngine(deps({ vault, todo: { ...deps().todo, createTask } }));
+
+		await engine.runPollCycle(loadSyncData(undefined));
+
+		expect(createTask).not.toHaveBeenCalled();
+		expect((vault as VaultAdapter & { _dump(): Record<string, string> })._dump()['note.md']).toBe(
+			original,
+		);
+	});
+
 	it('skips recurring tasks entirely', async () => {
 		const vault = fakeVault({
 			'note.md': '- [ ] Water plants 📅 2026-10-01 🔁 every week',
@@ -190,5 +204,121 @@ describe('SyncEngine.runPollCycle', () => {
 		const engine = new SyncEngine(deps());
 		const result = await engine.runPollCycle(loadSyncData(undefined));
 		expect(result.deltaLink).toBe('cursor-1');
+	});
+
+	it('drops a tombstone-shaped delta entry (no title/dueDateTime) instead of queueing it', async () => {
+		const vault = fakeVault({});
+		const fetchDelta = vi.fn(async () => ({
+			tasks: [{ id: 'x', '@removed': { reason: 'deleted' } } as unknown as TodoTask],
+			deltaLink: 'cursor-2',
+		}));
+		const engine = new SyncEngine(deps({ vault, todo: { ...deps().todo, fetchDelta } }));
+
+		const result = await engine.runPollCycle(loadSyncData(undefined));
+
+		expect(result.pending).toEqual([]);
+		expect(result.taskStates['x']).toBeUndefined();
+	});
+
+	it('adopts an orphaned marker (no taskStates entry) when remote is present and newer', async () => {
+		const vault = fakeVault({
+			'note.md': '- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%',
+		});
+		const fetchDelta = vi.fn(async () => ({
+			tasks: [
+				baseTask({
+					status: 'completed',
+					completedDateTime: { dateTime: '2026-09-21T00:00:00', timeZone: 'UTC' },
+					lastModifiedDateTime: '2026-09-21T10:00:00Z',
+				}),
+			],
+			deltaLink: 'cursor-2',
+		}));
+		const priorData = loadSyncData({ deltaLink: 'cursor-1', taskStates: {}, pending: [] });
+		const engine = new SyncEngine(deps({ vault, todo: { ...deps().todo, fetchDelta } }));
+
+		const result = await engine.runPollCycle(priorData);
+
+		expect((vault as VaultAdapter & { _dump(): Record<string, string> })._dump()['note.md']).toBe(
+			'- [x] Renew passport 📅 2026-10-01 ✅ 2026-09-21 %%todo:t1%%',
+		);
+		expect(result.taskStates['t1']).toBeDefined();
+	});
+
+	it('adopts an orphaned marker and pushes local when remote is absent from the delta', async () => {
+		const vault = fakeVault({
+			'note.md': '- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%',
+		});
+		const updateTask = vi.fn(async () => baseTask());
+		const priorData = loadSyncData({ deltaLink: 'cursor-1', taskStates: {}, pending: [] });
+		const engine = new SyncEngine(deps({ vault, todo: { ...deps().todo, updateTask } }));
+
+		const result = await engine.runPollCycle(priorData);
+
+		expect(updateTask).toHaveBeenCalledTimes(1);
+		expect(result.taskStates['t1']).toBeDefined();
+	});
+
+	it('isolates a per-task failure so the rest of the cycle still completes', async () => {
+		const store: Record<string, string> = {
+			'bad.md': '- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%',
+			'good.md': '- [ ] Buy milk 📅 2026-10-02 %%todo:t2%%',
+		};
+		const mtimes: Record<string, number> = { 'bad.md': 1_000, 'good.md': 1_000 };
+		const vault: VaultAdapter & { _dump(): Record<string, string> } = {
+			listMarkdownFiles() {
+				return Object.keys(store).map((path) => ({ path, mtimeMs: mtimes[path]! }));
+			},
+			async read(file) {
+				return store[file.path]!;
+			},
+			async update(file, mutate) {
+				if (file.path === 'bad.md') throw new Error('boom');
+				store[file.path] = mutate(store[file.path]!);
+				mtimes[file.path] = Date.now();
+			},
+			getFile(path) {
+				return path in store ? { path, mtimeMs: mtimes[path]! } : null;
+			},
+			_dump: () => ({ ...store }),
+		};
+		const fetchDelta = vi.fn(async () => ({
+			tasks: [
+				baseTask({
+					id: 't1',
+					status: 'completed',
+					completedDateTime: { dateTime: '2026-09-21T00:00:00', timeZone: 'UTC' },
+					lastModifiedDateTime: '2026-09-21T10:00:00Z',
+				}),
+				baseTask({
+					id: 't2',
+					title: 'Buy milk',
+					status: 'completed',
+					completedDateTime: { dateTime: '2026-09-21T00:00:00', timeZone: 'UTC' },
+					lastModifiedDateTime: '2026-09-21T10:00:00Z',
+				}),
+			],
+			deltaLink: 'cursor-2',
+		}));
+		const priorData = loadSyncData({
+			deltaLink: 'cursor-1',
+			taskStates: {
+				t1: { lastKnownRemoteModified: '2026-09-20T09:00:00Z', lastSyncedAtMs: 1_000 },
+				t2: { lastKnownRemoteModified: '2026-09-20T09:00:00Z', lastSyncedAtMs: 1_000 },
+			},
+			pending: [],
+		});
+		const engine = new SyncEngine(deps({ vault, todo: { ...deps().todo, fetchDelta } }));
+
+		const result = await engine.runPollCycle(priorData);
+
+		expect(vault._dump()['good.md']).toBe(
+			'- [x] Buy milk 📅 2026-10-01 ✅ 2026-09-21 %%todo:t2%%',
+		);
+		expect(vault._dump()['bad.md']).toBe('- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%');
+		// The failing task's state is left untouched (still the stale pre-cycle value),
+		// so next cycle's localChanged/remoteChanged comparison retries it.
+		expect(result.taskStates['t1']).toEqual(priorData.taskStates['t1']);
+		expect(result.taskStates['t2']).not.toEqual(priorData.taskStates['t2']);
 	});
 });

@@ -1,5 +1,13 @@
 # Obsidian Sample Plugin
 
+## Setup
+
+This plugin needs an Entra ID app registration before it can authenticate against Microsoft Graph:
+
+1. Register an app in Entra ID as a public client, platform "Mobile and desktop applications", with redirect URI `https://login.microsoftonline.com/common/oauth2/nativeclient`.
+2. Grant it the delegated `Tasks.ReadWrite` permission.
+3. Paste the Application (client) ID into `CLIENT_ID` in `src/auth/config.ts` before building.
+
 This is a sample plugin for Obsidian (https://obsidian.md).
 
 This project uses TypeScript to provide type checking and documentation.

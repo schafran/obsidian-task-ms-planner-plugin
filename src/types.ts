@@ -1,4 +1,5 @@
 export interface ParsedTaskLine {
+	indent: string;
 	checked: boolean;
 	title: string;
 	dueDate: string | null; // YYYY-MM-DD

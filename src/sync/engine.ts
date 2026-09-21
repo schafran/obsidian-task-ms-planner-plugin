@@ -37,7 +37,11 @@ export class SyncEngine {
 		const { todo, vault, now, log } = this.deps;
 		const list = await todo.ensureList(this.deps.listName);
 		const delta = await todo.fetchDelta(list.id, data.deltaLink || undefined);
-		const remoteById = new Map(delta.tasks.map((t) => [t.id, t]));
+		// Defensive filter: guard against Graph delta tombstones ({id, '@removed': {...}}
+		// with no title/dueDateTime) reaching the engine even if a future caller of
+		// runPollCycle doesn't go through TodoClient.fetchDelta's own filtering.
+		const liveTasks = delta.tasks.filter((t) => !('@removed' in t));
+		const remoteById = new Map(liveTasks.map((t) => [t.id, t]));
 
 		const files = vault.listMarkdownFiles();
 		const localByTodoId = new Map<string, LocatedLine>();
@@ -62,53 +66,67 @@ export class SyncEngine {
 
 		// Matched pairs: decide winner by last-write-wins.
 		for (const [todoId, located] of localByTodoId) {
-			const remote = remoteById.get(todoId);
-			const state = taskStates[todoId];
-			if (!state) continue;
+			try {
+				const remote = remoteById.get(todoId);
+				// An orphaned marker (a %%todo:id%% left on a line with no taskStates entry,
+				// e.g. after a mid-cycle error on a previous run) is adopted here with
+				// lastSyncedAtMs: 0 so it flows through the normal last-write-wins
+				// reconciliation below instead of being silently skipped forever.
+				const state = taskStates[todoId] ?? { lastKnownRemoteModified: '', lastSyncedAtMs: 0 };
 
-			// A task absent from the delta response means it has not changed remotely
-			// since the last delta cursor (Graph delta semantics: unchanged items are
-			// omitted). Only treat it as remote-changed when it's actually present.
-			const remoteChanged = remote
-				? new Date(remote.lastModifiedDateTime).getTime() > state.lastSyncedAtMs
-				: false;
-			const localChanged = located.file.mtimeMs > state.lastSyncedAtMs;
+				// A task absent from the delta response means it has not changed remotely
+				// since the last delta cursor (Graph delta semantics: unchanged items are
+				// omitted). Only treat it as remote-changed when it's actually present.
+				const remoteChanged = remote
+					? new Date(remote.lastModifiedDateTime).getTime() > state.lastSyncedAtMs
+					: false;
+				const localChanged = located.file.mtimeMs > state.lastSyncedAtMs;
 
-			if (remoteChanged && !localChanged) {
-				await this.applyRemoteToLocal(located, remote!);
-			} else if (localChanged && !remoteChanged) {
-				await this.applyLocalToRemote(list.id, located, todo);
-			} else if (remoteChanged && localChanged) {
-				if (new Date(remote!.lastModifiedDateTime).getTime() >= located.file.mtimeMs) {
+				if (remoteChanged && !localChanged) {
 					await this.applyRemoteToLocal(located, remote!);
-				} else {
+				} else if (localChanged && !remoteChanged) {
 					await this.applyLocalToRemote(list.id, located, todo);
+				} else if (remoteChanged && localChanged) {
+					if (new Date(remote!.lastModifiedDateTime).getTime() >= located.file.mtimeMs) {
+						await this.applyRemoteToLocal(located, remote!);
+					} else {
+						await this.applyLocalToRemote(list.id, located, todo);
+					}
 				}
-			}
 
-			taskStates[todoId] = {
-				lastKnownRemoteModified: remote ? remote.lastModifiedDateTime : state.lastKnownRemoteModified,
-				lastSyncedAtMs: now().getTime(),
-			};
+				taskStates[todoId] = {
+					lastKnownRemoteModified: remote
+						? remote.lastModifiedDateTime
+						: state.lastKnownRemoteModified,
+					lastSyncedAtMs: now().getTime(),
+				};
+			} catch (err) {
+				log(`Sync cycle: failed to process matched task ${todoId}: ${String(err)}`);
+			}
 		}
 
 		// Local tasks with a due date and no marker: push to To Do.
 		for (const located of localWithoutMarker) {
-			if (!located.parsed.dueDate) continue;
-			const created = await todo.createTask(list.id, {
-				title: located.parsed.title,
-				dueDate: located.parsed.dueDate,
-				reminderTime: this.deps.reminderTime,
-			});
-			await vault.update(located.file, (content) => {
-				const lines = content.split('\n');
-				lines[located.lineIndex] = renderTaskLine({ ...located.parsed, todoId: created.id });
-				return lines.join('\n');
-			});
-			taskStates[created.id] = {
-				lastKnownRemoteModified: created.lastModifiedDateTime,
-				lastSyncedAtMs: now().getTime(),
-			};
+			try {
+				if (!located.parsed.dueDate) continue;
+				if (located.parsed.checked) continue;
+				const created = await todo.createTask(list.id, {
+					title: located.parsed.title,
+					dueDate: located.parsed.dueDate,
+					reminderTime: this.deps.reminderTime,
+				});
+				await vault.update(located.file, (content) => {
+					const lines = content.split('\n');
+					lines[located.lineIndex] = renderTaskLine({ ...located.parsed, todoId: created.id });
+					return lines.join('\n');
+				});
+				taskStates[created.id] = {
+					lastKnownRemoteModified: created.lastModifiedDateTime,
+					lastSyncedAtMs: now().getTime(),
+				};
+			} catch (err) {
+				log(`Sync cycle: failed to push local task in ${located.file.path}: ${String(err)}`);
+			}
 		}
 
 		// Remote tasks with no matching local line: queue as new-from-remote.
@@ -122,24 +140,29 @@ export class SyncEngine {
 		const weeklyNoteFile = vault.getFile(weeklyNotePath);
 		if (weeklyNoteFile) {
 			for (const pendingTask of pendingQueue.all) {
-				await vault.update(weeklyNoteFile, (content) =>
-					insertActionItem(
-						content,
-						renderTaskLine({
-							checked: false,
-							title: pendingTask.title,
-							dueDate: pendingTask.dueDate,
-							doneDate: null,
-							recurring: false,
-							todoId: pendingTask.todoId,
-						}),
-					),
-				);
-				pendingQueue.remove(pendingTask.todoId);
-				taskStates[pendingTask.todoId] = {
-					lastKnownRemoteModified: now().toISOString(),
-					lastSyncedAtMs: now().getTime(),
-				};
+				try {
+					await vault.update(weeklyNoteFile, (content) =>
+						insertActionItem(
+							content,
+							renderTaskLine({
+								indent: '',
+								checked: false,
+								title: pendingTask.title,
+								dueDate: pendingTask.dueDate,
+								doneDate: null,
+								recurring: false,
+								todoId: pendingTask.todoId,
+							}),
+						),
+					);
+					pendingQueue.remove(pendingTask.todoId);
+					taskStates[pendingTask.todoId] = {
+						lastKnownRemoteModified: now().toISOString(),
+						lastSyncedAtMs: now().getTime(),
+					};
+				} catch (err) {
+					log(`Sync cycle: failed to flush pending task ${pendingTask.todoId}: ${String(err)}`);
+				}
 			}
 		}
 

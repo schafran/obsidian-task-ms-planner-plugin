@@ -1,64 +1,71 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from 'obsidian';
 import { TodoClient } from './client';
 import { RetryAfterError } from './types';
 
-function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
+function urlResponse(
+	body: unknown,
+	status = 200,
+	headers: Record<string, string> = {},
+): RequestUrlResponse {
 	return {
-		ok: status >= 200 && status < 300,
 		status,
-		headers: { get: (k: string) => headers[k] ?? null },
-		json: async () => body,
-		text: async () => JSON.stringify(body),
-	} as Response;
+		headers,
+		json: body,
+		text: JSON.stringify(body),
+		arrayBuffer: new ArrayBuffer(0),
+	};
 }
 
 describe('TodoClient', () => {
 	const getAccessToken = vi.fn(async () => 'fake-token');
-	let fetchMock: Mock<[url: string, init: RequestInit], Promise<Response>>;
+	let requestUrlMock: Mock<[params: RequestUrlParam], Promise<RequestUrlResponse>>;
 
 	beforeEach(() => {
-		fetchMock = vi.fn();
-		vi.stubGlobal('fetch', fetchMock);
+		requestUrlMock = requestUrl as unknown as Mock<
+			[params: RequestUrlParam],
+			Promise<RequestUrlResponse>
+		>;
+		requestUrlMock.mockReset();
 	});
 
 	afterEach(() => {
-		vi.unstubAllGlobals();
 		getAccessToken.mockClear();
 	});
 
 	it('ensureList returns an existing list by display name without creating one', async () => {
-		fetchMock.mockResolvedValueOnce(
-			jsonResponse({ value: [{ id: '1', displayName: 'Obsidian' }] }),
+		requestUrlMock.mockResolvedValueOnce(
+			urlResponse({ value: [{ id: '1', displayName: 'Obsidian' }] }),
 		);
 		const client = new TodoClient(getAccessToken);
 		const list = await client.ensureList('Obsidian');
 		expect(list).toEqual({ id: '1', displayName: 'Obsidian' });
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(requestUrlMock).toHaveBeenCalledTimes(1);
 	});
 
 	it('ensureList creates the list when none matches', async () => {
-		fetchMock
-			.mockResolvedValueOnce(jsonResponse({ value: [] }))
-			.mockResolvedValueOnce(jsonResponse({ id: '2', displayName: 'Obsidian' }));
+		requestUrlMock
+			.mockResolvedValueOnce(urlResponse({ value: [] }))
+			.mockResolvedValueOnce(urlResponse({ id: '2', displayName: 'Obsidian' }));
 		const client = new TodoClient(getAccessToken);
 		const list = await client.ensureList('Obsidian');
 		expect(list).toEqual({ id: '2', displayName: 'Obsidian' });
-		expect(fetchMock).toHaveBeenCalledTimes(2);
-		const [, createInit] = fetchMock.mock.calls[1]!;
-		expect(JSON.parse(createInit.body as string)).toEqual({ displayName: 'Obsidian' });
+		expect(requestUrlMock).toHaveBeenCalledTimes(2);
+		const [createParams] = requestUrlMock.mock.calls[1]!;
+		expect(JSON.parse(createParams.body as string)).toEqual({ displayName: 'Obsidian' });
 	});
 
 	it('createTask sends title, due date, and reminder', async () => {
-		fetchMock.mockResolvedValueOnce(jsonResponse({ id: 't1' }));
+		requestUrlMock.mockResolvedValueOnce(urlResponse({ id: 't1' }));
 		const client = new TodoClient(getAccessToken);
 		await client.createTask('list1', {
 			title: 'Renew passport',
 			dueDate: '2026-10-01',
 			reminderTime: '08:00',
 		});
-		const [url, init] = fetchMock.mock.calls[0]!;
-		expect(url).toBe('https://graph.microsoft.com/v1.0/me/todo/lists/list1/tasks');
-		const body = JSON.parse(init.body as string) as {
+		const [params] = requestUrlMock.mock.calls[0]!;
+		expect(params.url).toBe('https://graph.microsoft.com/v1.0/me/todo/lists/list1/tasks');
+		const body = JSON.parse(params.body as string) as {
 			title: string;
 			dueDateTime: unknown;
 			reminderDateTime: unknown;
@@ -74,25 +81,25 @@ describe('TodoClient', () => {
 	});
 
 	it('updateTask PATCHes only the given fields', async () => {
-		fetchMock.mockResolvedValueOnce(jsonResponse({ id: 't1', status: 'completed' }));
+		requestUrlMock.mockResolvedValueOnce(urlResponse({ id: 't1', status: 'completed' }));
 		const client = new TodoClient(getAccessToken);
 		await client.updateTask('list1', 't1', { status: 'completed' });
-		const [url, init] = fetchMock.mock.calls[0]!;
-		expect(url).toBe('https://graph.microsoft.com/v1.0/me/todo/lists/list1/tasks/t1');
-		expect(init.method).toBe('PATCH');
-		expect(JSON.parse(init.body as string)).toEqual({ status: 'completed' });
+		const [params] = requestUrlMock.mock.calls[0]!;
+		expect(params.url).toBe('https://graph.microsoft.com/v1.0/me/todo/lists/list1/tasks/t1');
+		expect(params.method).toBe('PATCH');
+		expect(JSON.parse(params.body as string)).toEqual({ status: 'completed' });
 	});
 
 	it('fetchDelta follows nextLink pages and returns the final deltaLink', async () => {
-		fetchMock
+		requestUrlMock
 			.mockResolvedValueOnce(
-				jsonResponse({
+				urlResponse({
 					value: [{ id: 'a' }],
 					'@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/list1/tasks/delta?$skiptoken=1',
 				}),
 			)
 			.mockResolvedValueOnce(
-				jsonResponse({ value: [{ id: 'b' }], '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/final' }),
+				urlResponse({ value: [{ id: 'b' }], '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/final' }),
 			);
 		const client = new TodoClient(getAccessToken);
 		const result = await client.fetchDelta('list1');
@@ -100,10 +107,22 @@ describe('TodoClient', () => {
 		expect(result.deltaLink).toBe('https://graph.microsoft.com/v1.0/final');
 	});
 
+	it('filters @removed tombstones out of the returned tasks', async () => {
+		requestUrlMock.mockResolvedValueOnce(
+			urlResponse({
+				value: [{ id: 'a', title: 'Normal task' }, { id: 'x', '@removed': { reason: 'deleted' } }],
+				'@odata.deltaLink': 'https://graph.microsoft.com/v1.0/final',
+			}),
+		);
+		const client = new TodoClient(getAccessToken);
+		const result = await client.fetchDelta('list1');
+		expect(result.tasks.map((t) => t.id)).toEqual(['a']);
+	});
+
 	it('throws RetryAfterError on 429 with the Retry-After value', async () => {
-		fetchMock
-			.mockResolvedValueOnce(jsonResponse({}, 429, { 'Retry-After': '30' }))
-			.mockResolvedValueOnce(jsonResponse({}, 429, { 'Retry-After': '30' }));
+		requestUrlMock
+			.mockResolvedValueOnce(urlResponse({}, 429, { 'Retry-After': '30' }))
+			.mockResolvedValueOnce(urlResponse({}, 429, { 'Retry-After': '30' }));
 		const client = new TodoClient(getAccessToken);
 		await expect(client.fetchDelta('list1')).rejects.toBeInstanceOf(RetryAfterError);
 		try {
@@ -114,7 +133,7 @@ describe('TodoClient', () => {
 	});
 
 	it('throws a descriptive error on other non-2xx responses', async () => {
-		fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'nope' }, 500));
+		requestUrlMock.mockResolvedValueOnce(urlResponse({ error: 'nope' }, 500));
 		const client = new TodoClient(getAccessToken);
 		await expect(client.fetchDelta('list1')).rejects.toThrow(/500/);
 	});

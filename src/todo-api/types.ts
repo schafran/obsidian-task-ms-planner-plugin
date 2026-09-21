@@ -24,6 +24,7 @@ export interface TodoTask {
 	lastModifiedDateTime: string;
 	isReminderOn: boolean;
 	reminderDateTime: TodoDateTime | null;
+	'@removed'?: { reason: string };
 }
 
 export interface NewTaskInput {

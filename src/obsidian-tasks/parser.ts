@@ -7,6 +7,8 @@ const RECURRENCE_RE = /🔁[^\n]*$/;
 const MARKER_RE = /%%todo:([^%]+)%%/;
 
 export function parseTaskLine(line: string): ParsedTaskLine | null {
+	const indentMatch = /^(\s*)/.exec(line);
+	const indent = indentMatch![1]!;
 	const checkboxMatch = CHECKBOX_RE.exec(line.trim());
 	if (!checkboxMatch) return null;
 
@@ -26,6 +28,7 @@ export function parseTaskLine(line: string): ParsedTaskLine | null {
 		.trim();
 
 	return {
+		indent,
 		checked: mark!.toLowerCase() === 'x',
 		title,
 		dueDate: dueMatch[1]!,
@@ -37,7 +40,7 @@ export function parseTaskLine(line: string): ParsedTaskLine | null {
 
 export function renderTaskLine(task: ParsedTaskLine): string {
 	const mark = task.checked ? 'x' : ' ';
-	let line = `- [${mark}] ${task.title} 📅 ${task.dueDate}`;
+	let line = `${task.indent}- [${mark}] ${task.title} 📅 ${task.dueDate}`;
 	if (task.doneDate) line += ` ✅ ${task.doneDate}`;
 	if (task.todoId) line += ` %%todo:${task.todoId}%%`;
 	return line;

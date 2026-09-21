@@ -1,6 +1,13 @@
+import { requestUrl, type RequestUrlParam } from 'obsidian';
 import { RetryAfterError, type DeltaResult, type NewTaskInput, type TodoList, type TodoTask } from './types';
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
+
+interface RequestInit {
+	method?: string;
+	headers?: Record<string, string>;
+	body?: string;
+}
 
 export class TodoClient {
 	constructor(private readonly getAccessToken: () => Promise<string>) {}
@@ -8,24 +15,29 @@ export class TodoClient {
 	private async request<T>(pathOrUrl: string, init: RequestInit = {}): Promise<T> {
 		const token = await this.getAccessToken();
 		const url = pathOrUrl.startsWith('http') ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
-		const res = await fetch(url, {
-			...init,
+		const params: RequestUrlParam = {
+			url,
+			method: init.method,
 			headers: {
-				...(init.headers as Record<string, string> | undefined),
+				...init.headers,
 				Authorization: `Bearer ${token}`,
 				'Content-Type': 'application/json',
 			},
-		});
+			body: init.body,
+			throw: false,
+		};
+		const res = await requestUrl(params);
 
 		if (res.status === 429) {
-			const retryAfter = Number(res.headers.get('Retry-After') ?? '60');
-			throw new RetryAfterError(retryAfter);
+			const retryAfterHeader =
+				res.headers['Retry-After'] ?? res.headers['retry-after'] ?? '60';
+			throw new RetryAfterError(Number(retryAfterHeader));
 		}
-		if (!res.ok) {
-			throw new Error(`Graph request failed: ${res.status} ${await res.text()}`);
+		if (res.status < 200 || res.status >= 300) {
+			throw new Error(`Graph request failed: ${res.status} ${res.text}`);
 		}
 		if (res.status === 204) return undefined as T;
-		return (await res.json()) as T;
+		return res.json as T;
 	}
 
 	async listLists(): Promise<TodoList[]> {
@@ -77,10 +89,12 @@ export class TodoClient {
 			'@odata.nextLink'?: string;
 		}>(path);
 
+		const tasks = data.value.filter((t) => !('@removed' in t));
+
 		if (data['@odata.nextLink']) {
 			const next = await this.fetchDelta(listId, data['@odata.nextLink']);
-			return { tasks: [...data.value, ...next.tasks], deltaLink: next.deltaLink };
+			return { tasks: [...tasks, ...next.tasks], deltaLink: next.deltaLink };
 		}
-		return { tasks: data.value, deltaLink: data['@odata.deltaLink'] ?? '' };
+		return { tasks, deltaLink: data['@odata.deltaLink'] ?? '' };
 	}
 }
