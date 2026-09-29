@@ -38,7 +38,7 @@ describe('parseTaskLine', () => {
 
 	it('parses the sync marker', () => {
 		const parsed = parseTaskLine(
-			'- [ ] Renew passport 📅 2026-10-01 %%todo:AAMkAGI1%%',
+			'- [ ] Renew passport %%todo:AAMkAGI1%% 📅 2026-10-01',
 		);
 		expect(parsed?.todoId).toBe('AAMkAGI1');
 		expect(parsed?.title).toBe('Renew passport');
@@ -94,13 +94,45 @@ describe('renderTaskLine', () => {
 				recurring: false,
 				todoId: 'AAMkAGI1',
 			}),
-		).toBe('- [x] Renew passport 📅 2026-10-01 ✅ 2026-09-30 %%todo:AAMkAGI1%%');
+		).toBe('- [x] Renew passport %%todo:AAMkAGI1%% 📅 2026-10-01 ✅ 2026-09-30');
+	});
+
+	it('parses a legacy line with the marker after the dates and re-renders it marker-first', () => {
+		const parsed = parseTaskLine('- [x] Renew passport 📅 2026-10-01 ✅ 2026-09-30 %%todo:abc%%');
+		expect(parsed).toMatchObject({ title: 'Renew passport', todoId: 'abc', dueDate: '2026-10-01' });
+		expect(renderTaskLine(parsed!)).toBe(
+			'- [x] Renew passport %%todo:abc%% 📅 2026-10-01 ✅ 2026-09-30',
+		);
 	});
 
 	it('round-trips parse -> render for a marker-bearing line', () => {
-		const line = '- [ ] Review [[Design doc]] #urgent 📅 2026-10-01 %%todo:abc%%';
+		const line = '- [ ] Review [[Design doc]] #urgent %%todo:abc%% 📅 2026-10-01';
 		const parsed = parseTaskLine(line);
 		expect(parsed).not.toBeNull();
 		expect(renderTaskLine(parsed!)).toBe(line);
+	});
+});
+
+describe('tasks without a due date', () => {
+	it('parses a marker line with no due date', () => {
+		const parsed = parseTaskLine('- [ ] Buy milk %%todo:abc%% NO DUE DATE');
+		expect(parsed).toMatchObject({ title: 'Buy milk', dueDate: null, todoId: 'abc' });
+	});
+
+	it('round-trips a no-due-date line', () => {
+		const line = '- [x] Buy milk %%todo:abc%% NO DUE DATE ✅ 2026-09-21';
+		const parsed = parseTaskLine(line);
+		expect(parsed).toMatchObject({ dueDate: null, doneDate: '2026-09-21', checked: true });
+		expect(renderTaskLine(parsed!)).toBe(line);
+	});
+
+	it('heals a legacy line with a dangling empty 📅', () => {
+		const parsed = parseTaskLine('- [ ] Buy milk %%todo:abc%% 📅 ');
+		expect(parsed).toMatchObject({ title: 'Buy milk', dueDate: null });
+		expect(renderTaskLine(parsed!)).toBe('- [ ] Buy milk %%todo:abc%% NO DUE DATE');
+	});
+
+	it('still ignores a plain checkbox without marker or due date', () => {
+		expect(parseTaskLine('- [ ] Buy milk')).toBeNull();
 	});
 });

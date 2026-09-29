@@ -1,8 +1,5 @@
-/*
-
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
-*/
+.todo-sync-marker {
+	opacity: 0.4;
+	font-size: 0.8em;
+	cursor: default;
+}

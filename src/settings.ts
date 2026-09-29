@@ -39,7 +39,14 @@ export class TodoSyncSettingTab extends PluginSettingTab {
 					.setButtonText(
 						this.plugin.settings.signedInAccountLabel ? 'Sign out' : 'Sign in',
 					)
-					.onClick(() => this.plugin.handleSignInOutFromSettings());
+					.onClick(async () => {
+						button.setDisabled(true);
+						try {
+							await this.plugin.handleSignInOutFromSettings();
+						} finally {
+							this.display();
+						}
+					});
 			});
 
 		new Setting(containerEl)

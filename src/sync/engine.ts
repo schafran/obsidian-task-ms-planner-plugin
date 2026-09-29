@@ -22,12 +22,19 @@ interface LocatedLine {
 	parsed: ParsedTaskLine;
 }
 
-function toDueDate(task: TodoTask): string {
-	return (task.dueDateTime?.dateTime ?? '').slice(0, 10);
+function toDueDate(task: TodoTask): string | null {
+	return task.dueDateTime?.dateTime.slice(0, 10) || null;
 }
 
+// Graph returns completedDateTime in UTC; the note should show the local day.
 function toDoneDate(task: TodoTask): string | null {
-	return task.completedDateTime ? task.completedDateTime.dateTime.slice(0, 10) : null;
+	const completed = task.completedDateTime;
+	if (!completed) return null;
+	const hasOffset = /(Z|[+-]\d{2}:?\d{2})$/.test(completed.dateTime);
+	const date = new Date(hasOffset ? completed.dateTime : `${completed.dateTime}Z`);
+	if (Number.isNaN(date.getTime())) return completed.dateTime.slice(0, 10);
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 export class SyncEngine {
@@ -150,7 +157,7 @@ export class SyncEngine {
 								indent: '',
 								checked: false,
 								title: pendingTask.title,
-								dueDate: pendingTask.dueDate,
+								dueDate: pendingTask.dueDate || null,
 								doneDate: null,
 								recurring: false,
 								todoId: pendingTask.todoId,
@@ -195,11 +202,13 @@ export class SyncEngine {
 		located: LocatedLine,
 		todo: SyncEngineDeps['todo'],
 	): Promise<void> {
-		if (!located.parsed.todoId || !located.parsed.dueDate) return;
+		if (!located.parsed.todoId) return;
 		await todo.updateTask(listId, located.parsed.todoId, {
 			title: located.parsed.title,
 			status: located.parsed.checked ? 'completed' : 'notStarted',
-			dueDateTime: { dateTime: `${located.parsed.dueDate}T00:00:00`, timeZone: 'UTC' },
+			dueDateTime: located.parsed.dueDate
+				? { dateTime: `${located.parsed.dueDate}T00:00:00`, timeZone: 'UTC' }
+				: null,
 		});
 	}
 }

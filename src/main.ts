@@ -6,6 +6,7 @@ import { MsalDeviceCodeAuth } from './auth/msal-device-code';
 import { TodoClient } from './todo-api/client';
 import { SyncEngine } from './sync/engine';
 import { loadSyncData, serializeSyncData, type SyncData } from './sync/state-store';
+import { hideMarkerExtension } from './editor/hide-marker';
 import { DeviceCodeModal } from './ui/device-code-modal';
 import { RetryAfterError } from './todo-api/types';
 
@@ -24,6 +25,7 @@ export default class TodoSyncPlugin extends Plugin {
 
 	async onload() {
 		await this.loadPersistedData();
+		this.registerEditorExtension(hideMarkerExtension);
 
 		this.auth = new MsalDeviceCodeAuth(createCachePlugin(this.app.secretStorage));
 		this.todoClient = new TodoClient(() => this.getAccessToken());
@@ -120,7 +122,6 @@ export default class TodoSyncPlugin extends Plugin {
 		} else {
 			await this.signIn();
 		}
-		this.app.workspace.trigger('layout-change');
 	}
 
 	startPolling(): void {

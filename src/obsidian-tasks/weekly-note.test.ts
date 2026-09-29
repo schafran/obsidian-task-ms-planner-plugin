@@ -28,7 +28,7 @@ describe('getIsoWeekNotePath', () => {
 });
 
 describe('insertActionItem', () => {
-	const NEW_LINE = '- [ ] Buy milk 📅 2026-10-01 %%todo:xyz%%';
+	const NEW_LINE = '- [ ] Buy milk %%todo:xyz%% 📅 2026-10-01';
 
 	it('replaces the empty placeholder line under the heading', () => {
 		const content = [

@@ -1,7 +1,7 @@
 export interface PendingRemoteTask {
 	todoId: string;
 	title: string;
-	dueDate: string;
+	dueDate: string | null; // legacy entries may hold ''
 }
 
 export class PendingQueue {

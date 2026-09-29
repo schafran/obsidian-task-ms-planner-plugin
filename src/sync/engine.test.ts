@@ -75,7 +75,7 @@ describe('SyncEngine.runPollCycle', () => {
 			reminderTime: '08:00',
 		});
 		expect((vault as VaultAdapter & { _dump(): Record<string, string> })._dump()['note.md']).toBe(
-			'- [ ] Renew passport 📅 2026-10-01 %%todo:new-id%%',
+			'- [ ] Renew passport %%todo:new-id%% 📅 2026-10-01',
 		);
 		expect(result.taskStates['new-id']).toBeDefined();
 	});
@@ -108,7 +108,7 @@ describe('SyncEngine.runPollCycle', () => {
 
 	it('applies a remote completion to the matching local line', async () => {
 		const vault = fakeVault({
-			'note.md': '- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%',
+			'note.md': '- [ ] Renew passport %%todo:t1%% 📅 2026-10-01',
 		});
 		const fetchDelta = vi.fn(async () => ({
 			tasks: [
@@ -130,13 +130,13 @@ describe('SyncEngine.runPollCycle', () => {
 		await engine.runPollCycle(priorData);
 
 		expect((vault as VaultAdapter & { _dump(): Record<string, string> })._dump()['note.md']).toBe(
-			'- [x] Renew passport 📅 2026-10-01 ✅ 2026-09-21 %%todo:t1%%',
+			'- [x] Renew passport %%todo:t1%% 📅 2026-10-01 ✅ 2026-09-21',
 		);
 	});
 
 	it('pushes a local edit to a matched task up to To Do when the local file changed more recently', async () => {
 		const vault = fakeVault({
-			'note.md': '- [x] Renew passport 📅 2026-10-05 ✅ 2026-09-21 %%todo:t1%%',
+			'note.md': '- [x] Renew passport %%todo:t1%% 📅 2026-10-05 ✅ 2026-09-21',
 		});
 		// local file's mtime (from fakeVault) is 1_000; last sync was also at 1_000 in priorData
 		// but fakeVault always reports mtimeMs 1_000 for pre-seeded files and bumps on update,
@@ -195,7 +195,7 @@ describe('SyncEngine.runPollCycle', () => {
 				'Calendar/Weekly/2026-W39.md'
 			],
 		).toBe(
-			['### Other Action Items', '- [ ] Buy milk 📅 2026-10-01 %%todo:remote-1%%'].join('\n'),
+			['### Other Action Items', '- [ ] Buy milk %%todo:remote-1%% 📅 2026-10-01'].join('\n'),
 		);
 		expect(result.pending).toEqual([]);
 	});
@@ -222,7 +222,7 @@ describe('SyncEngine.runPollCycle', () => {
 
 	it('adopts an orphaned marker (no taskStates entry) when remote is present and newer', async () => {
 		const vault = fakeVault({
-			'note.md': '- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%',
+			'note.md': '- [ ] Renew passport %%todo:t1%% 📅 2026-10-01',
 		});
 		const fetchDelta = vi.fn(async () => ({
 			tasks: [
@@ -240,14 +240,14 @@ describe('SyncEngine.runPollCycle', () => {
 		const result = await engine.runPollCycle(priorData);
 
 		expect((vault as VaultAdapter & { _dump(): Record<string, string> })._dump()['note.md']).toBe(
-			'- [x] Renew passport 📅 2026-10-01 ✅ 2026-09-21 %%todo:t1%%',
+			'- [x] Renew passport %%todo:t1%% 📅 2026-10-01 ✅ 2026-09-21',
 		);
 		expect(result.taskStates['t1']).toBeDefined();
 	});
 
 	it('adopts an orphaned marker and pushes local when remote is absent from the delta', async () => {
 		const vault = fakeVault({
-			'note.md': '- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%',
+			'note.md': '- [ ] Renew passport %%todo:t1%% 📅 2026-10-01',
 		});
 		const updateTask = vi.fn(async () => baseTask());
 		const priorData = loadSyncData({ deltaLink: 'cursor-1', taskStates: {}, pending: [] });
@@ -261,7 +261,7 @@ describe('SyncEngine.runPollCycle', () => {
 
 	it('propagates a RetryAfterError instead of swallowing it as a per-task failure', async () => {
 		const vault = fakeVault({
-			'note.md': '- [x] Renew passport 📅 2026-10-05 ✅ 2026-09-21 %%todo:t1%%',
+			'note.md': '- [x] Renew passport %%todo:t1%% 📅 2026-10-05 ✅ 2026-09-21',
 		});
 		const updateTask = vi.fn(async () => {
 			throw new RetryAfterError(30);
@@ -278,8 +278,8 @@ describe('SyncEngine.runPollCycle', () => {
 
 	it('isolates a per-task failure so the rest of the cycle still completes', async () => {
 		const store: Record<string, string> = {
-			'bad.md': '- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%',
-			'good.md': '- [ ] Buy milk 📅 2026-10-02 %%todo:t2%%',
+			'bad.md': '- [ ] Renew passport %%todo:t1%% 📅 2026-10-01',
+			'good.md': '- [ ] Buy milk %%todo:t2%% 📅 2026-10-02',
 		};
 		const mtimes: Record<string, number> = { 'bad.md': 1_000, 'good.md': 1_000 };
 		const vault: VaultAdapter & { _dump(): Record<string, string> } = {
@@ -330,12 +330,91 @@ describe('SyncEngine.runPollCycle', () => {
 		const result = await engine.runPollCycle(priorData);
 
 		expect(vault._dump()['good.md']).toBe(
-			'- [x] Buy milk 📅 2026-10-01 ✅ 2026-09-21 %%todo:t2%%',
+			'- [x] Buy milk %%todo:t2%% 📅 2026-10-01 ✅ 2026-09-21',
 		);
-		expect(vault._dump()['bad.md']).toBe('- [ ] Renew passport 📅 2026-10-01 %%todo:t1%%');
+		expect(vault._dump()['bad.md']).toBe('- [ ] Renew passport %%todo:t1%% 📅 2026-10-01');
 		// The failing task's state is left untouched (still the stale pre-cycle value),
 		// so next cycle's localChanged/remoteChanged comparison retries it.
 		expect(result.taskStates['t1']).toEqual(priorData.taskStates['t1']);
 		expect(result.taskStates['t2']).not.toEqual(priorData.taskStates['t2']);
+	});
+
+	it('renders a remote task without due date as NO DUE DATE and later applies its completion', async () => {
+		const noDue = baseTask({ id: 'n1', title: 'Call bank', dueDateTime: null });
+		const v1 = fakeVault({ 'Calendar/Weekly/2026-W39.md': '### Other Action Items' });
+		const e1 = new SyncEngine(
+			deps({ vault: v1, todo: { ...deps().todo, fetchDelta: vi.fn(async () => ({ tasks: [noDue], deltaLink: 'c1' })) } }),
+		);
+		const r1 = await e1.runPollCycle(loadSyncData(undefined));
+		const dump = (v: VaultAdapter) => (v as VaultAdapter & { _dump(): Record<string, string> })._dump();
+		expect(dump(v1)['Calendar/Weekly/2026-W39.md']).toBe(
+			['### Other Action Items', '- [ ] Call bank %%todo:n1%% NO DUE DATE'].join('\n'),
+		);
+
+		const done = baseTask({
+			id: 'n1',
+			title: 'Call bank',
+			dueDateTime: null,
+			status: 'completed',
+			completedDateTime: { dateTime: '2026-09-21T09:00:00', timeZone: 'UTC' },
+			lastModifiedDateTime: '2999-01-01T00:00:00Z',
+		});
+		const e2 = new SyncEngine(
+			deps({ vault: v1, todo: { ...deps().todo, fetchDelta: vi.fn(async () => ({ tasks: [done], deltaLink: 'c2' })) } }),
+		);
+		await e2.runPollCycle({
+			...r1,
+			taskStates: { n1: { lastKnownRemoteModified: '2026-09-20T09:00:00Z', lastSyncedAtMs: 1_000 } },
+		});
+		expect(dump(v1)['Calendar/Weekly/2026-W39.md']).toContain(
+			'- [x] Call bank %%todo:n1%% NO DUE DATE ✅ 2026-09-21',
+		);
+	});
+
+	it('pushes local completion of a no-due-date task with dueDateTime null', async () => {
+		const vault = fakeVault({ 'note.md': '- [x] Call bank %%todo:n1%% NO DUE DATE ✅ 2026-09-21' });
+		const updateTask = vi.fn(async () => baseTask());
+		const priorData = loadSyncData({
+			deltaLink: 'c1',
+			taskStates: { n1: { lastKnownRemoteModified: '2026-09-20T09:00:00Z', lastSyncedAtMs: 500 } },
+			pending: [],
+		});
+		const engine = new SyncEngine(deps({ vault, todo: { ...deps().todo, updateTask } }));
+		await engine.runPollCycle(priorData);
+		expect(updateTask).toHaveBeenCalledWith('list1', 'n1', {
+			title: 'Call bank',
+			status: 'completed',
+			dueDateTime: null,
+		});
+	});
+
+	it('shows the local day for a completion that is the previous day in UTC', async () => {
+		const prevTz = process.env.TZ;
+		process.env.TZ = 'Europe/Zurich';
+		try {
+			const vault = fakeVault({ 'note.md': '- [ ] Renew passport %%todo:t1%% 📅 2026-10-01' });
+			const fetchDelta = vi.fn(async () => ({
+				tasks: [
+					baseTask({
+						status: 'completed',
+						completedDateTime: { dateTime: '2026-09-20T22:30:00.0000000', timeZone: 'UTC' },
+						lastModifiedDateTime: '2026-09-21T10:00:00Z',
+					}),
+				],
+				deltaLink: 'c2',
+			}));
+			const priorData = loadSyncData({
+				deltaLink: 'c1',
+				taskStates: { t1: { lastKnownRemoteModified: '2026-09-20T09:00:00Z', lastSyncedAtMs: 1_000 } },
+				pending: [],
+			});
+			await new SyncEngine(deps({ vault, todo: { ...deps().todo, fetchDelta } })).runPollCycle(priorData);
+			expect((vault as VaultAdapter & { _dump(): Record<string, string> })._dump()['note.md']).toBe(
+				'- [x] Renew passport %%todo:t1%% 📅 2026-10-01 ✅ 2026-09-21',
+			);
+		} finally {
+			if (prevTz === undefined) delete process.env.TZ;
+			else process.env.TZ = prevTz;
+		}
 	});
 });
