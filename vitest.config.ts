@@ -6,6 +6,7 @@ export default defineConfig({
 		environment: 'jsdom',
 		alias: {
 			obsidian: path.resolve(__dirname, 'tests/mocks/obsidian.ts'),
+			electron: path.resolve(__dirname, 'tests/mocks/electron.ts'),
 		},
 	},
 });

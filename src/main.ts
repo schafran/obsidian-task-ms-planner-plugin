@@ -95,7 +95,7 @@ export default class TodoSyncPlugin extends Plugin {
 		const modal = new DeviceCodeModal(this.app);
 		modal.open();
 		try {
-			await this.auth.signIn((info) => modal.showDeviceCode(info));
+			await this.auth.signIn(() => modal.showWaitingForBrowser());
 			this.settings.signedInAccountLabel = 'Microsoft account';
 			await this.saveSettings();
 			modal.showSuccess(this.settings.signedInAccountLabel);

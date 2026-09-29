@@ -1,21 +1,16 @@
 import { App, Modal } from 'obsidian';
-import type { DeviceCodeInfo } from '../auth/msal-device-code';
 
 export class DeviceCodeModal extends Modal {
 	constructor(app: App) {
 		super(app);
 	}
 
-	showDeviceCode(info: DeviceCodeInfo): void {
+	showWaitingForBrowser(): void {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.createEl('h2', { text: 'Sign in to Microsoft' });
 		contentEl.createEl('p', {
-			text: `Go to ${info.verificationUri} and enter this code:`,
-		});
-		contentEl.createEl('p', { text: info.userCode, cls: 'todo-sync-device-code' });
-		contentEl.createEl('p', {
-			text: 'Waiting for you to complete sign-in in your browser...',
+			text: 'Opening your browser to sign in. Waiting for you to complete sign-in...',
 		});
 	}
 

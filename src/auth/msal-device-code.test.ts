@@ -1,65 +1,91 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DeviceCodeRequest } from '@azure/msal-node';
 
-type DeviceCodeResponse = Parameters<DeviceCodeRequest['deviceCodeCallback']>[0];
+const {
+	getAuthCodeUrl,
+	acquireTokenByCode,
+	acquireTokenSilent,
+	getAllAccounts,
+	removeAccount,
+	generatePkceCodes,
+	createNewGuid,
+	waitForAuthCode,
+} = vi.hoisted(() => ({
+	getAuthCodeUrl: vi.fn(),
+	acquireTokenByCode: vi.fn(),
+	acquireTokenSilent: vi.fn(),
+	getAllAccounts: vi.fn(),
+	removeAccount: vi.fn(),
+	generatePkceCodes: vi.fn(),
+	createNewGuid: vi.fn(),
+	waitForAuthCode: vi.fn(),
+}));
 
-const acquireTokenByDeviceCode = vi.fn();
-const acquireTokenSilent = vi.fn();
-const getAllAccounts = vi.fn();
-const removeAccount = vi.fn();
+import { shell } from 'electron';
+// eslint-disable-next-line @typescript-eslint/unbound-method -- test-only mock reference, never called unbound
+const openExternal = shell.openExternal as ReturnType<typeof vi.fn>;
 
 vi.mock('@azure/msal-node', () => ({
 	PublicClientApplication: vi.fn().mockImplementation(() => ({
-		acquireTokenByDeviceCode,
+		getAuthCodeUrl,
+		acquireTokenByCode,
 		acquireTokenSilent,
 		getTokenCache: () => ({ getAllAccounts, removeAccount }),
 	})),
+	CryptoProvider: vi.fn().mockImplementation(() => ({
+		generatePkceCodes,
+		createNewGuid,
+	})),
+}));
+
+vi.mock('./loopback-server', () => ({
+	waitForAuthCode,
 }));
 
 import { MsalDeviceCodeAuth } from './msal-device-code';
 
 describe('MsalDeviceCodeAuth', () => {
 	beforeEach(() => {
-		acquireTokenByDeviceCode.mockReset();
+		getAuthCodeUrl.mockReset();
+		acquireTokenByCode.mockReset();
 		acquireTokenSilent.mockReset();
 		getAllAccounts.mockReset();
 		removeAccount.mockReset();
+		generatePkceCodes.mockReset();
+		createNewGuid.mockReset();
+		waitForAuthCode.mockReset();
+		openExternal.mockReset();
+
+		generatePkceCodes.mockResolvedValue({ verifier: 'verifier-1', challenge: 'challenge-1' });
+		createNewGuid.mockReturnValue('state-1');
+		getAuthCodeUrl.mockResolvedValue('https://login.microsoftonline.com/authorize?...');
+		openExternal.mockResolvedValue(undefined);
 	});
 
-	it('signIn forwards the device code details to the callback and returns the access token', async () => {
-		acquireTokenByDeviceCode.mockImplementation(
-			async ({
-				deviceCodeCallback,
-			}: {
-				deviceCodeCallback: (response: DeviceCodeResponse) => void;
-			}) => {
-				deviceCodeCallback({
-					userCode: 'ABC123',
-					deviceCode: 'device-code-1',
-					verificationUri: 'https://microsoft.com/devicelogin',
-					message: 'Go there and enter ABC123',
-					expiresIn: 900,
-					interval: 5,
-				});
-				return { accessToken: 'token-1', account: { homeAccountId: 'acc-1' } };
-			},
-		);
+	it('signIn opens the browser and exchanges the returned code for a token', async () => {
+		waitForAuthCode.mockResolvedValue({ code: 'auth-code-1', state: 'state-1' });
+		acquireTokenByCode.mockResolvedValue({ accessToken: 'token-1', account: { homeAccountId: 'acc-1' } });
 
 		const auth = new MsalDeviceCodeAuth({} as never);
-		const onDeviceCode = vi.fn();
-		const token = await auth.signIn(onDeviceCode);
+		const onWaitingForBrowser = vi.fn();
+		const token = await auth.signIn(onWaitingForBrowser);
 
-		expect(onDeviceCode).toHaveBeenCalledWith({
-			userCode: 'ABC123',
-			verificationUri: 'https://microsoft.com/devicelogin',
-			message: 'Go there and enter ABC123',
-			expiresIn: 900,
-		});
+		expect(onWaitingForBrowser).toHaveBeenCalled();
+		expect(openExternal).toHaveBeenCalledWith('https://login.microsoftonline.com/authorize?...');
+		expect(acquireTokenByCode).toHaveBeenCalledWith(
+			expect.objectContaining({ code: 'auth-code-1', codeVerifier: 'verifier-1' }),
+		);
 		expect(token).toBe('token-1');
 	});
 
+	it('signIn throws on state mismatch', async () => {
+		waitForAuthCode.mockResolvedValue({ code: 'auth-code-1', state: 'wrong-state' });
+		const auth = new MsalDeviceCodeAuth({} as never);
+		await expect(auth.signIn(vi.fn())).rejects.toThrow(/state mismatch/);
+	});
+
 	it('signIn throws when MSAL returns no result', async () => {
-		acquireTokenByDeviceCode.mockResolvedValue(null);
+		waitForAuthCode.mockResolvedValue({ code: 'auth-code-1', state: 'state-1' });
+		acquireTokenByCode.mockResolvedValue(null);
 		const auth = new MsalDeviceCodeAuth({} as never);
 		await expect(auth.signIn(vi.fn())).rejects.toThrow(/no result/);
 	});
